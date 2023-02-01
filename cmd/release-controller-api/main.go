@@ -214,7 +214,7 @@ func (o *options) Run() error {
 	klog.Infof("%s releases will be sourced from the following namespaces: %s, and jobs will be run in %s", strings.Title(architecture), strings.Join(o.ReleaseNamespaces, " "), o.JobNamespace)
 
 	imageCache := releasecontroller.NewLatestImageCache(tagParts[0], tagParts[1])
-	execReleaseInfo := releasecontroller.NewExecReleaseInfo(toolsClient, toolsConfig, o.JobNamespace, releaseNamespace, imageCache.Get)
+	execReleaseInfo := releasecontroller.NewExecReleaseInfo(toolsClient, toolsConfig, o.JobNamespace, releaseNamespace, imageCache.Get, jiraClient, bugzillaClient)
 	releaseInfo := releasecontroller.NewCachingReleaseInfo(execReleaseInfo, 64*1024*1024, architecture)
 
 	graph := releasecontroller.NewUpgradeGraph(architecture)
@@ -228,9 +228,6 @@ func (o *options) Run() error {
 		architecture,
 		o.ARTSuffix,
 	)
-
-	c.jiraClient = jiraClient
-	c.bugzillaClient = bugzillaClient
 
 	var hasSynced []cache.InformerSynced
 	stopCh := wait.NeverStop
