@@ -153,6 +153,8 @@ func (c *Controller) userInterfaceHandler() http.Handler {
 	mux.HandleFunc("/api/v1/releasestreams/rejected", c.apiRejectedStreams)
 	mux.HandleFunc("/api/v1/releasestreams/all", c.apiAllStreams)
 
+	mux.HandleFunc("/api/v1/features/{release}/release/{tag}", c.apiFeatureReleaseInfo)
+
 	// static files
 	mux.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.FS(resources))))
 
@@ -324,6 +326,49 @@ func (c *Controller) apiReleaseTags(w http.ResponseWriter, req *http.Request) {
 	default:
 		http.Error(w, fmt.Sprintf("error: Must specify one of '', 'json', 'pullSpec', 'name', or 'downloadURL"), http.StatusBadRequest)
 	}
+}
+
+func (c *Controller) apiFeatureReleaseInfo(w http.ResponseWriter, req *http.Request) {
+	tagInfo, err := c.getReleaseTagInfo(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	verificationJobs, msg := c.getVerificationJobs(*tagInfo.Info.Tag, tagInfo.Info.Release)
+	if len(msg) > 0 {
+		klog.V(4).Infof("Unable to retrieve verification job results for: %s", tagInfo.Tag)
+	}
+	changeLogJSON := renderResult{}
+	var changeLog releasecontroller.ChangeLog
+	c.changeLogWorker(&changeLogJSON, tagInfo, "json")
+	if changeLogJSON.err == nil {
+		err = json.Unmarshal([]byte(changeLogJSON.out), &changeLog)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	summary := releasecontroller.APIReleaseInfo{
+		Name:          tagInfo.Tag,
+		Phase:         tagInfo.Info.Tag.Annotations[releasecontroller.ReleaseAnnotationPhase],
+		Results:       verificationJobs,
+		UpgradesTo:    c.graph.UpgradesTo(tagInfo.Tag),
+		UpgradesFrom:  c.graph.UpgradesFrom(tagInfo.Tag),
+		ChangeLogJson: changeLog,
+	}
+	data, err := json.MarshalIndent(&summary, "", "  ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+
 }
 
 func (c *Controller) apiReleaseInfo(w http.ResponseWriter, req *http.Request) {

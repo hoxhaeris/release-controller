@@ -570,6 +570,40 @@ func extractBugsFromChangeLog(changelog ChangeLog, bugSource string) bugsAndIssu
 	}
 }
 
+type issueDetails struct {
+	summary     string
+	parent      string
+	epic        string
+	issueType   string
+	description string
+}
+
+func TransformJiraIssues(issues []jiraBaseClient.Issue) map[string]issueDetails {
+	t := make(map[string]issueDetails, 0)
+	for _, issue := range issues {
+		var epic string
+		var parent string
+		for unknownField, value := range issue.Fields.Unknowns {
+			if value != nil {
+				switch unknownField {
+				case jiraCustomFieldEpicLink:
+					epic = value.(string)
+				case jiraCustomFieldParentLink:
+					parent = value.(string)
+				}
+			}
+		}
+		t[issue.Key] = issueDetails{
+			summary:     issue.Fields.Summary,
+			parent:      parent,
+			epic:        epic,
+			issueType:   issue.Fields.Type.Name,
+			description: issue.Fields.Type.Description,
+		}
+	}
+	return t
+}
+
 func (r *ExecReleaseInfo) RefreshPod() error {
 	sts, err := r.client.AppsV1().StatefulSets(r.namespace).Get(context.TODO(), "git-cache", metav1.GetOptions{})
 	if err != nil {
