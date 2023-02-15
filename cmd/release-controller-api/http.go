@@ -168,7 +168,6 @@ func (c *Controller) apiFeatureReleaseInfo(w http.ResponseWriter, req *http.Requ
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-
 	changeLogJSON := renderResult{}
 	var changeLog releasecontroller.ChangeLog
 	c.changeLogWorker(&changeLogJSON, tagInfo, "json")
@@ -200,26 +199,6 @@ func (c *Controller) apiFeatureReleaseInfo(w http.ResponseWriter, req *http.Requ
 		}
 
 	}
-	//var featureTrees []FeatureTree
-	//for _, feature := range featureJiraTickets {
-	//	var children []FeatureTree
-	//	for issueKey, issueDetails := range mapIssueDetails {
-	//		if issueDetails.Parent == feature {
-	//			children = append(children, FeatureTree{
-	//				IssueKey:    issueKey,
-	//				Summary:     issueDetails.Summary,
-	//				Description: issueDetails.Description,
-	//				Children:    nil,
-	//			})
-	//		}
-	//	}
-	//	featureTrees = append(featureTrees, FeatureTree{
-	//		IssueKey:    feature,
-	//		Summary:     mapIssueDetails[feature].Summary,
-	//		Description: mapIssueDetails[feature].Description,
-	//		Children:    children,
-	//	})
-	//}
 	var featureTreesTest []*FeatureTree
 	for _, feature := range featureJiraTickets {
 		featureTreesTest = append(featureTreesTest, &FeatureTree{
@@ -230,8 +209,7 @@ func (c *Controller) apiFeatureReleaseInfo(w http.ResponseWriter, req *http.Requ
 			Children:    nil,
 		})
 	}
-
-	RecursiveLoop(featureTreesTest, mapIssueDetails)
+	GetChildrenRecursively(featureTreesTest, mapIssueDetails)
 	data, err := json.MarshalIndent(&featureTreesTest, "", "  ")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -250,7 +228,7 @@ type FeatureTree struct {
 	Children    []*FeatureTree
 }
 
-func RecursiveLoop(children []*FeatureTree, issues map[string]releasecontroller.IssueDetails) {
+func GetChildrenRecursively(children []*FeatureTree, issues map[string]releasecontroller.IssueDetails) {
 	for _, child := range children {
 		var children []*FeatureTree
 		for issueKey, issueDetails := range issues {
@@ -278,7 +256,7 @@ func RecursiveLoop(children []*FeatureTree, issues map[string]releasecontroller.
 			}
 		}
 		child.Children = children
-		RecursiveLoop(child.Children, issues)
+		GetChildrenRecursively(child.Children, issues)
 	}
 }
 
