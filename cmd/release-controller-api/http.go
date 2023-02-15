@@ -168,10 +168,7 @@ func (c *Controller) apiFeatureReleaseInfo(w http.ResponseWriter, req *http.Requ
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
-	verificationJobs, msg := c.getVerificationJobs(*tagInfo.Info.Tag, tagInfo.Info.Release)
-	if len(msg) > 0 {
-		klog.V(4).Infof("Unable to retrieve verification job results for: %s", tagInfo.Tag)
-	}
+
 	changeLogJSON := renderResult{}
 	var changeLog releasecontroller.ChangeLog
 	c.changeLogWorker(&changeLogJSON, tagInfo, "json")
@@ -229,25 +226,17 @@ func (c *Controller) apiFeatureReleaseInfo(w http.ResponseWriter, req *http.Requ
 			IssueKey:    feature,
 			Summary:     mapIssueDetails[feature].Summary,
 			Description: mapIssueDetails[feature].Description,
+			Type:        mapIssueDetails[feature].IssueType,
 			Children:    nil,
 		})
 	}
 
 	RecursiveLoop(featureTreesTest, mapIssueDetails)
-	summary := releasecontroller.APIReleaseInfo{
-		Name:          tagInfo.Tag,
-		Phase:         tagInfo.Info.Tag.Annotations[releasecontroller.ReleaseAnnotationPhase],
-		Results:       verificationJobs,
-		UpgradesTo:    c.graph.UpgradesTo(tagInfo.Tag),
-		UpgradesFrom:  c.graph.UpgradesFrom(tagInfo.Tag),
-		ChangeLogJson: changeLog,
-	}
-	data, err := json.MarshalIndent(&summary, "", "  ")
+	data, err := json.MarshalIndent(&featureTreesTest, "", "  ")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.Write(data)
 
@@ -257,6 +246,7 @@ type FeatureTree struct {
 	IssueKey    string
 	Summary     string
 	Description string
+	Type        string
 	Children    []*FeatureTree
 }
 
@@ -264,13 +254,27 @@ func RecursiveLoop(children []*FeatureTree, issues map[string]releasecontroller.
 	for _, child := range children {
 		var children []*FeatureTree
 		for issueKey, issueDetails := range issues {
-			if issueDetails.Parent == child.IssueKey {
-				children = append(children, &FeatureTree{
-					IssueKey:    issueKey,
-					Summary:     issueDetails.Summary,
-					Description: issueDetails.Description,
-					Children:    nil,
-				})
+			if child.Type == "Feature" {
+				if issueDetails.Parent == child.IssueKey {
+					children = append(children, &FeatureTree{
+						IssueKey:    issueKey,
+						Summary:     issueDetails.Summary,
+						Description: issueDetails.Description,
+						Type:        issueDetails.IssueType,
+						Children:    nil,
+					})
+				}
+			}
+			if child.Type == "Epic" {
+				if issueDetails.Epic == child.IssueKey {
+					children = append(children, &FeatureTree{
+						IssueKey:    issueKey,
+						Summary:     issueDetails.Summary,
+						Description: issueDetails.Description,
+						Type:        issueDetails.IssueType,
+						Children:    nil,
+					})
+				}
 			}
 		}
 		child.Children = children
