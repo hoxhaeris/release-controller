@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	jiraBaseClient "github.com/andygrunwald/go-jira"
 	"github.com/openshift/release-controller/pkg/rhcos"
 	"io/fs"
 	"math"
@@ -153,10 +154,128 @@ func (c *Controller) userInterfaceHandler() http.Handler {
 	mux.HandleFunc("/api/v1/releasestreams/rejected", c.apiRejectedStreams)
 	mux.HandleFunc("/api/v1/releasestreams/all", c.apiAllStreams)
 
+	mux.HandleFunc("/api/v1/features/{release}/release/{tag}", c.apiFeatureReleaseInfo)
+
 	// static files
 	mux.PathPrefix("/static/").Handler(http.StripPrefix("/static/", http.FileServer(http.FS(resources))))
 
 	return mux
+}
+
+func (c *Controller) apiFeatureReleaseInfo(w http.ResponseWriter, req *http.Request) {
+	tagInfo, err := c.getReleaseTagInfo(req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	verificationJobs, msg := c.getVerificationJobs(*tagInfo.Info.Tag, tagInfo.Info.Release)
+	if len(msg) > 0 {
+		klog.V(4).Infof("Unable to retrieve verification job results for: %s", tagInfo.Tag)
+	}
+	changeLogJSON := renderResult{}
+	var changeLog releasecontroller.ChangeLog
+	c.changeLogWorker(&changeLogJSON, tagInfo, "json")
+	if changeLogJSON.err == nil {
+		err = json.Unmarshal([]byte(changeLogJSON.out), &changeLog)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var d []jiraBaseClient.Issue
+	info, err := c.releaseInfo.IssuesInfo(changeLogJSON.out)
+	if err != nil {
+		return
+	}
+	err = json.Unmarshal([]byte(info), &d)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	mapIssueDetails := releasecontroller.TransformJiraIssues(d)
+	var featureJiraTickets []string
+	for issue, details := range mapIssueDetails {
+		if details.IssueType == "Feature" {
+			featureJiraTickets = append(featureJiraTickets, issue)
+		}
+
+	}
+	//var featureTrees []FeatureTree
+	//for _, feature := range featureJiraTickets {
+	//	var children []FeatureTree
+	//	for issueKey, issueDetails := range mapIssueDetails {
+	//		if issueDetails.Parent == feature {
+	//			children = append(children, FeatureTree{
+	//				IssueKey:    issueKey,
+	//				Summary:     issueDetails.Summary,
+	//				Description: issueDetails.Description,
+	//				Children:    nil,
+	//			})
+	//		}
+	//	}
+	//	featureTrees = append(featureTrees, FeatureTree{
+	//		IssueKey:    feature,
+	//		Summary:     mapIssueDetails[feature].Summary,
+	//		Description: mapIssueDetails[feature].Description,
+	//		Children:    children,
+	//	})
+	//}
+	var featureTreesTest []*FeatureTree
+	for _, feature := range featureJiraTickets {
+		featureTreesTest = append(featureTreesTest, &FeatureTree{
+			IssueKey:    feature,
+			Summary:     mapIssueDetails[feature].Summary,
+			Description: mapIssueDetails[feature].Description,
+			Children:    nil,
+		})
+	}
+
+	RecursiveLoop(featureTreesTest, mapIssueDetails)
+	summary := releasecontroller.APIReleaseInfo{
+		Name:          tagInfo.Tag,
+		Phase:         tagInfo.Info.Tag.Annotations[releasecontroller.ReleaseAnnotationPhase],
+		Results:       verificationJobs,
+		UpgradesTo:    c.graph.UpgradesTo(tagInfo.Tag),
+		UpgradesFrom:  c.graph.UpgradesFrom(tagInfo.Tag),
+		ChangeLogJson: changeLog,
+	}
+	data, err := json.MarshalIndent(&summary, "", "  ")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(data)
+
+}
+
+type FeatureTree struct {
+	IssueKey    string
+	Summary     string
+	Description string
+	Children    []*FeatureTree
+}
+
+func RecursiveLoop(children []*FeatureTree, issues map[string]releasecontroller.IssueDetails) {
+	for _, child := range children {
+		var children []*FeatureTree
+		for issueKey, issueDetails := range issues {
+			if issueDetails.Parent == child.IssueKey {
+				children = append(children, &FeatureTree{
+					IssueKey:    issueKey,
+					Summary:     issueDetails.Summary,
+					Description: issueDetails.Description,
+					Children:    nil,
+				})
+			}
+		}
+		child.Children = children
+		RecursiveLoop(child.Children, issues)
+	}
 }
 
 func (c *Controller) urlForArtifacts(tagName string) (string, bool) {

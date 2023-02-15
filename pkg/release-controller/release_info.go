@@ -32,8 +32,8 @@ import (
 
 const (
 	sourceJira                = "jira"
-	jiraCustomFieldEpicLink   = "customfield_12311140"
-	jiraCustomFieldParentLink = "customfield_12313140"
+	JiraCustomFieldEpicLink   = "customfield_12311140"
+	JiraCustomFieldParentLink = "customfield_12313140"
 )
 
 type CachingReleaseInfo struct {
@@ -406,6 +406,40 @@ func (r *ExecReleaseInfo) IssuesInfo(changelog string) (string, error) {
 	return string(s), nil
 }
 
+type IssueDetails struct {
+	Summary     string
+	Parent      string
+	Epic        string
+	IssueType   string
+	Description string
+}
+
+func TransformJiraIssues(issues []jiraBaseClient.Issue) map[string]IssueDetails {
+	t := make(map[string]IssueDetails, 0)
+	for _, issue := range issues {
+		var epic string
+		var parent string
+		for unknownField, value := range issue.Fields.Unknowns {
+			if value != nil {
+				switch unknownField {
+				case JiraCustomFieldEpicLink:
+					epic = value.(string)
+				case JiraCustomFieldParentLink:
+					parent = value.(string)
+				}
+			}
+		}
+		t[issue.Key] = IssueDetails{
+			Summary:     issue.Fields.Summary,
+			Parent:      parent,
+			Epic:        epic,
+			IssueType:   issue.Fields.Type.Name,
+			Description: issue.Fields.Type.Description,
+		}
+	}
+	return t
+}
+
 func (r *ExecReleaseInfo) GetIssuesWithChunks(issues []string) ([]jiraBaseClient.Issue, error) {
 	// keep the chunk on the small side, it is much faster
 	// there is a limit for API calls per second in Akamai for Jira, don't chunk too much
@@ -434,8 +468,8 @@ func (r *ExecReleaseInfo) GetIssuesWithChunks(issues []string) ([]jiraBaseClient
 					MaxResults: chunk + 1,
 					Fields: []string{
 						"summary",
-						jiraCustomFieldEpicLink,
-						jiraCustomFieldParentLink,
+						JiraCustomFieldEpicLink,
+						JiraCustomFieldParentLink,
 						"issuetype",
 						"description",
 					},
