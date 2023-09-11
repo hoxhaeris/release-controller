@@ -195,6 +195,7 @@ func (c *Verifier) SetFeatureFixedVersions(issues sets.Set[string], tagName, ver
 		}
 		if feature.Fields.FixVersions == nil || len(feature.Fields.FixVersions) == 0 {
 			tmpIssue := &jiraBaseClient.Issue{Key: feature.Key}
+			tmpIssue.Fields = &jiraBaseClient.IssueFields{}
 			tmpIssue.Fields.FixVersions = []*jiraBaseClient.FixVersion{{Name: version}}
 			if _, err := c.jiraClient.UpdateIssue(tmpIssue); err != nil {
 				errs = append(errs, fmt.Errorf("unable to update fix versions for feature %s: %v", featureID, err))
